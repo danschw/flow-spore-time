@@ -11,36 +11,31 @@ set.seed(1)
    folders <- 
    list.dirs(here("data/FCM/fcs/"),recursive = F)
    
-   #set this manually to process data of a single day
-   day <- "20210204_WLO_L1_D14_WSO_L1_D14_T48H_2"
+   day = "sample-data"
    
-   folders <- folders[grep(paste0(day), folders)]
-   folders <- list.dirs(folders)
+   # #set this manually to process data of a single day
+   # day <- "SOME_FILTER"
+   # folders <- folders[grep(paste0(day), folders)]
+   # folders <- list.dirs(folders)
+   # # remove the folder of folders
+   # folders <- folders[-1]
    
-   #remove the folder of folders
-   folders <- folders[-1]
-   
-# Make directories to store the data
+   # Make directories to store the data
    if (! dir.exists(here("fig/gate_plots/", day))){
       dir.create(here("fig/gate_plots/", day))
    }
-   
+
    if (! dir.exists(here("data/output/", day))){
       dir.create(here("data/output/", day))
    }
    
 # dilution of culture analysed in FCM:
-dilution <- "x10"
+dilution <- "x100"
 
 for (folder in folders[]){
 #### Load data, sample set ####
-sample.var <- c("culture","line","transfer","Tsample","colony","well","rep","xt","num") 
+sample.var <- c("strain","day","well","rep","xt","num") 
    
-#accomodate WLCt-L3 media comparison
-if (str_detect(day, "WLCt_L3")){
-   sample.var <- c("culture","line","transfer","Tsample","colony","medium", "well","rep","xt","num") 
-}
-
 fcsset <- flowCreateFlowSet(filepath = folder, sample_variables = sample.var,
                             transformation = FALSE,separators = "[-_]")
 #transform with arcsine, recpmendded by Karava et al.
@@ -60,13 +55,7 @@ df.stats$singlets <- NA
 df.stats$neg.rmv <- NA
 df.stats$noise.cutoff <- NA
 
-#accomodate WLCt-L3 media comparison
-if (str_detect(day, "WLCt_L3")){
-  #move media to num column do compatible with all other data
-   df.stats$num <- df.stats$medium
-   df.stats <- select(df.stats, -medium)
 
-}
 #### Gating for singlets with flowStats ####
 
 # The gate function needs to be applied to each sample seperatly
@@ -198,8 +187,8 @@ ggsave2(filename = paste0("scatterNoise_",fcsset[[i]]@description$`$SRC`,".png" 
 #### predict centers of sub-populations ####
 
 # Is host strain WT or mutant?
-mutant.host <- ( grepl("SN",df.stats$culture[1]) |
-               grepl("dSpo",df.stats$culture[1]))
+mutant.host <- ( grepl("SN",df.stats$strain[1]) |
+               grepl("dSpo",df.stats$strain[1]))
 # Load reference containing all subpopulations
 # I pre-compiled  models
 # if (mutant.host){
@@ -231,7 +220,7 @@ mutant.host <- ( grepl("SN",df.stats$culture[1]) |
 # save(df.mix, file=here("data/cluster_models","WSCt-L1_D14_T24H_C8_cluster_model.Rdata"))
 
 # model from data of new novocyte 
-base::load(file=here("data/cluster_models","WSCt-L1_D14_T24H_C8_cluster_model.Rdata"))
+base::load(file=here("data/cluster_models","WT.ANC_cluster_model.Rdata"))
 
 # getting centers for visualization and export
 
@@ -304,7 +293,7 @@ df.stats$veg.ml <- as.numeric(sapply(strsplit(df.stats$dilution,"x"), "[[", 2))*
 
 # write results to file
 write_csv(df.stats,
-         path = here("data/output/",day,paste0(fcsset[[i]]@description$`$SRC`,".csv")))
+         file = here("data/output/",day,paste0(fcsset[[i]]@description$`$SRC`,".csv")))
   
 print(paste("done",folder))
 } #folder loop
