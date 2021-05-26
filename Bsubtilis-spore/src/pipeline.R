@@ -1,5 +1,6 @@
 ## Coevolution with a seed bank - analysis of sporulation in evolved lines
 library(renv)
+# renv::init()
 # renv::restore()
 library(here)
 #analysis of flow-cytometry population data using Karava's analysis.R as reference.
@@ -22,23 +23,23 @@ set.seed(1)
 
    # Make directories to store the data
    if (! dir.exists(here("fig/gate_plots", day))){
-      dir.create(here("fig/gate_plots", day))
+      dir.create(here("fig/gate_plots", day), recursive = T)
    }
 
    if (! dir.exists(here("data/output", day))){
-      dir.create(here("data/output", day))
+      dir.create(here("data/output", day), recursive = T)
    }
    
 # dilution of culture analyzed in FCM:
 dilution <- "x100"
 
-#fields to parse from the .fcs file name (separated by underscore)
+#fields to parse from the .fcs file name (separated by underscore and/or hyphen)
 sample.var <- c("species","strain","colony","t.culture","medium","well","rep","xt","num") 
 
 for (folder in folders[]){
 #### Load data, sample set ####
 fcsset <- flowCreateFlowSet(filepath = folder, sample_variables = sample.var,
-                            transformation = FALSE,separators = "[-_]")
+                            transformation = FALSE,separators = "[-_\\.]")
 #transform with arcsine, recpmendded by Karava et al.
 fcsset <- Transform.Novocyte(fcsset)
 
@@ -294,7 +295,7 @@ df.stats$veg.ml <- as.numeric(sapply(strsplit(df.stats$dilution,"x"), "[[", 2))*
 
 # write results to file
 write_csv(df.stats,
-         file = here("data/output/",day,paste0(fcsset[[i]]@description$`$SRC`,".csv")))
+         path = here("data/output/",day,paste0(fcsset[[i]]@description$`$SRC`,".csv")))
   
 print(paste("done",folder))
 } #folder loop
