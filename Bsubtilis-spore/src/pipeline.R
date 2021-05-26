@@ -11,31 +11,32 @@ set.seed(1)
    folders <- 
    list.dirs(here("data/FCM/fcs/"),recursive = F)
    
-   day = "sample-data"
+
    
-   # #set this manually to process data of a single day
-   # day <- "SOME_FILTER"
-   # folders <- folders[grep(paste0(day), folders)]
-   # folders <- list.dirs(folders)
-   # # remove the folder of folders
-   # folders <- folders[-1]
-   
+   #set this manually to process data of a single day (folder)
+   day = "sample_data"
+   folders <- folders[grep(paste0(day), folders)]
+   folders <- list.dirs(folders)
+   # remove the folder of folders
+   folders <- folders[-1]
+
    # Make directories to store the data
-   if (! dir.exists(here("fig/gate_plots/", day))){
-      dir.create(here("fig/gate_plots/", day))
+   if (! dir.exists(here("fig/gate_plots", day))){
+      dir.create(here("fig/gate_plots", day))
    }
 
-   if (! dir.exists(here("data/output/", day))){
-      dir.create(here("data/output/", day))
+   if (! dir.exists(here("data/output", day))){
+      dir.create(here("data/output", day))
    }
    
-# dilution of culture analysed in FCM:
+# dilution of culture analyzed in FCM:
 dilution <- "x100"
+
+#fields to parse from the .fcs file name (separated by underscore)
+sample.var <- c("species","strain","colony","t.culture","medium","well","rep","xt","num") 
 
 for (folder in folders[]){
 #### Load data, sample set ####
-sample.var <- c("strain","day","well","rep","xt","num") 
-   
 fcsset <- flowCreateFlowSet(filepath = folder, sample_variables = sample.var,
                             transformation = FALSE,separators = "[-_]")
 #transform with arcsine, recpmendded by Karava et al.
@@ -220,7 +221,7 @@ mutant.host <- ( grepl("SN",df.stats$strain[1]) |
 # save(df.mix, file=here("data/cluster_models","WSCt-L1_D14_T24H_C8_cluster_model.Rdata"))
 
 # model from data of new novocyte 
-base::load(file=here("data/cluster_models","WT.ANC_cluster_model.Rdata"))
+base::load(file=here("data/cluster_models","sample_data_cluster_model.Rdata"))
 
 # getting centers for visualization and export
 
