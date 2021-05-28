@@ -1,3 +1,7 @@
+# Data and analysis products
+Bsubtilis-spore/data/output/*
+Bsubtilis-spore/fig/
+
 # History files
 .Rhistory
 .Rapp.history

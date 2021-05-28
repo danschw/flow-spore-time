@@ -1,0 +1,255 @@
+---
+title: 'Coevolution with a seed bank: sporulation of evolved clones'
+output: 
+   html_notebook:
+      code_folding: hide
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r, , include=FALSE}
+library(tidyverse, quietly = TRUE)
+library(cowplot, quietly = TRUE)
+library(outliers, quietly = TRUE)
+library(here, quietly = TRUE)
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+# get all the file names to collect
+files <- list.files(here("data/output/"), pattern = ".csv",full.names = T, recursive = T)
+d <- data.frame()
+
+#This loop collects all the data into a single dataframe
+
+for (f in files){
+   tmp <- read_csv(f)
+
+
+   #add experimental time (day) from folder name
+   tmp$day <-    f%>%
+      str_extract("T..H")%>%
+      str_remove("T")%>%
+      parse_number()
+   
+
+   
+   d <- rbind(d, tmp)
+
+      }
+rm(tmp)
+
+# #check completness of data
+# d%>%
+#    group_by(culture, line)%>%
+#    summarise(n=n())
+
+
+```
+
+clean up data
+
+```{r}
+# cleanup data
+d.clean <-
+   d%>%
+   #correct Wt to WT
+   mutate(culture = if_else(str_detect(culture,"Wt"),"WT", culture))%>%
+   # remove rows with NA at spore count
+   filter(!is.na(spore))%>%
+   # shorten replication name
+   mutate(rep = parse_number(rep) %>% paste0("r",.) )%>%
+   # make spore counts lower than 100 events 1 (0 on log scale)
+   mutate(spore = if_else(spore<100, 1, spore) )%>%
+   # make spore counts lower than 100 events 1 (0 on log scale)
+   mutate(veg = if_else(veg<100, 1, spore) )%>%
+   # remove extra WLCt colonies used for comaprisons of streaking media
+   filter (is.na(num) | num == "DSM" )
+
+```
+
+Look at data
+
+```{r}   
+   
+
+d.clean%>%
+   filter(culture!="BLANK")%>%
+   pivot_longer(names_to = "pop", values_to = "cell.ml", cols = c(veg, spore))%>%
+   ggplot(aes(x=colony, y=cell.ml))+
+   geom_hline(yintercept = 1e4)+
+   geom_point(aes(color=Tsample, shape=rep))+
+   facet_grid(pop~culture+line)+
+   theme_cowplot()+
+   panel_border()+
+   # scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5))
+```
+
+# Percent spores
+ 
+```{r, message=F}
+
+d.clean <- 
+   d.clean%>%
+   mutate(cell.ml=veg.ml+spore.ml)%>%
+   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))
+
+# export the data
+# write_csv(d.clean, here("data/FCM/cytometry_all.csv"))
+
+
+d.clean%>%
+   filter(culture!="BLANK")%>%
+   #average per colony
+   group_by(culture,line,Tsample, colony)%>%
+   summarise(perc.spore=mean(perc.spore), v=sd(perc.spore, na.rm = T))%>%
+   ungroup()%>%
+   mutate(flask=paste(culture,line,sep = "."))%>%
+   #add phage column
+   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
+   # arrange(desc(phage), ,desc(line))%>%
+   arrange(phage, culture,line)%>%
+   mutate(flask=fct_inorder(flask))%>%
+   #PLOT
+ggplot(aes(x=flask,y=perc.spore))+
+   geom_violin(aes(fill=phage), alpha=0.5)+
+   facet_grid(Tsample~.)+
+   theme_cowplot()+
+   panel_border()+
+   theme(legend.position = "bottom")
+
+```
+
+```{r, message=F}
+
+d.clean%>%
+   filter(culture!="BLANK")%>%
+   #average per colony
+   group_by(culture,line,Tsample, colony)%>%
+   summarise(v=sd(perc.spore),perc.spore=mean(perc.spore))%>%
+   ungroup()%>%
+   mutate(flask=paste(culture,line,sep = "."))%>%
+   #add phage column
+   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
+   # arrange(desc(phage), ,desc(line))%>%
+   arrange(phage, culture,line)%>%
+   mutate(flask=fct_inorder(flask))%>%
+   #PLOT
+ggplot(aes(x=Tsample, y=perc.spore, color=colony))+
+   geom_line(aes(group=colony))+
+   geom_errorbar(aes(ymin=perc.spore-v,ymax=perc.spore+v), width=.1)+
+   # geom_point(shape=21, fill="white", size=1.5)+
+   # geom_pointrange(aes(ymin=perc.spore-v,ymax=perc.spore+v), shape=21, fill="white", position = position_dodge(width = 1))+
+   facet_grid(line ~ culture)+
+   theme_cowplot()+
+   panel_border()
+
+```
+
+```{r, message=F}
+
+d.clean%>%
+   filter(culture!="BLANK")%>%
+   #average per colony
+   group_by(culture,line,Tsample, colony)%>%
+   summarise(v=sd(cell.ml),cell.ml=mean(cell.ml))%>%
+   ungroup()%>%
+   mutate(flask=paste(culture,line,sep = "."))%>%
+   #add phage column
+   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
+   # arrange(desc(phage), ,desc(line))%>%
+   arrange(phage, culture,line)%>%
+   mutate(flask=fct_inorder(flask))%>%
+   #PLOT
+ggplot(aes(x=Tsample, y=cell.ml, color=colony))+
+   geom_line(aes(group=colony))+
+   geom_errorbar(aes(ymin=cell.ml-v,ymax=cell.ml+v), width=.1)+
+   facet_grid(line ~ culture)+
+   scale_y_log10()+
+   theme_cowplot()+
+   panel_border()
+
+```
+
+```{r, message=F}
+
+d.clean <- d.clean%>%
+   filter(culture!="BLANK")%>%
+   mutate(cell.ml=veg.ml+spore.ml)%>%
+   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))
+
+d.clean%>%
+   #average per colony
+   group_by(culture,line,Tsample, colony)%>%
+   summarise(n=n(),v=sd(perc.spore),perc.spore=mean(perc.spore))%>%
+   ungroup()%>%
+   mutate(flask=paste(culture,line,sep = "."))%>%
+      #add phage column
+   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
+   # arrange(desc(phage), ,desc(line))%>%
+   arrange(phage, culture,line)%>%
+   mutate(flask=fct_inorder(flask))%>%
+   #PLOT
+ggplot(aes(x=colony, y=perc.spore))+
+   geom_col()+
+   geom_point(data = d.clean%>%mutate(flask=paste(culture,line,sep = ".")),
+                 shape=21, color="blue")+
+   geom_errorbar(aes(ymin=perc.spore-v,ymax=perc.spore+v), width=.3)+
+   # geom_text(aes(label=n), y=10)+
+   # geom_pointrange(aes(ymin=perc.spore-v,ymax=perc.spore+v), shape=21, fill="white", position = position_dodge(width = 1))+
+   facet_grid(Tsample~flask)+
+   theme_cowplot()+
+   panel_border()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5)) 
+
+```
+
+Getting N
+```{r}
+d.clean%>%
+   mutate(cell.ml=veg.ml+spore.ml)%>%
+   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))%>%
+   #average per colony
+   group_by(culture, line, Tsample, colony)%>%
+   summarise(n=n())%>%
+   arrange(n())
+```
+
+
+# compare seed bank treatments of non-infected lines
+
+```{r}
+d.avg <- read_csv(here("data/sporulation-growth.csv"))
+
+d.avg <-d.avg %>%
+   # average replicates
+   group_by(culture, host, phage, seed.bank, line, colony, Tsample) %>%
+   summarise(perc.spore = mean(perc.spore), .groups = "drop") %>%
+   # #add seed.bank column to ANC
+   mutate(seed.bank = if_else(line =="ANC", "ANC", seed.bank))%>%
+   # mutate(seed.bank = if_else(str_detect(line, "ANC"), "ANC", seed.bank))%>%
+   mutate(seed.bank = fct_relevel(seed.bank, "ANC", "short", "long"))
+   
+
+d.avg %>%
+   #get only non-infected evoloved lines
+   filter(phage == "no_Phage") %>%
+   # filter(Tsample == "T48H") %>%
+   #plot
+   ggplot(aes(x = seed.bank, y = perc.spore))+
+   geom_violin(fill = "grey")+
+   geom_jitter(aes(color=line), width = 0.2)+
+   theme_cowplot()+
+   facet_wrap(~Tsample)
+```
+
+```{r}
+d.avg %>%
+   #get only non-infected evoloved lines
+   filter(str_detect(culture, "Ct"))%>%
+   filter(Tsample == "T24H") %>%
+   t.test(perc.spore ~ seed.bank, data = .)
+
+```
+
