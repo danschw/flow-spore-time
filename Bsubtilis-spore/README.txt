@@ -35,6 +35,7 @@ for each group of replicates the pipeline should make 4 plots in flow-cyto-metho
 
 The actual counts. along with pipeline values collected along the way, are exported to flow-cyto-methods/Bsubtilis-spore/data/output as .csv file.
 
+*Needs work still*
 analysis_post_FCM.R can be used to bnd results from csv file to singlr data fram for further analysis.
 
  
