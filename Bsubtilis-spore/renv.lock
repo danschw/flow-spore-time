@@ -38,6 +38,12 @@
       "Repository": "CRAN",
       "Hash": "db75371846625725e221470b310da1d5"
     },
+    "BiocVersion": {
+      "Package": "BiocVersion",
+      "Version": "3.10.1",
+      "Source": "Bioconductor",
+      "Hash": "b69e4e634db423b8e6c58103d579ec95"
+    },
     "DBI": {
       "Package": "DBI",
       "Version": "1.1.1",
@@ -361,6 +367,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "a0cbe758a531d054b537d16dff4d58a1"
+    },
+    "diptest": {
+      "Package": "diptest",
+      "Version": "0.76-0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "bbd10b5bf75e6addef50928ffcc591ee"
     },
     "dplyr": {
       "Package": "dplyr",
@@ -771,6 +784,13 @@
       "Repository": "CRAN",
       "Hash": "910adbf965cd3be38078e1ceb66bdecd"
     },
+    "multimode": {
+      "Package": "multimode",
+      "Version": "1.5",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "31086865527d127b2116f72145060e82"
+    },
     "munsell": {
       "Package": "munsell",
       "Version": "0.5.0",
@@ -1000,6 +1020,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "241454e22c9d26b11669b78d06706b41"
+    },
+    "rootSolve": {
+      "Package": "rootSolve",
+      "Version": "1.8.2.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "b8fbe639ed0e0e4f4c80498f4411ec5f"
     },
     "roxygen2": {
       "Package": "roxygen2",
