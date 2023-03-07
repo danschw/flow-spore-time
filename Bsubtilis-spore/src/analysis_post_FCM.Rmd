@@ -1,9 +1,11 @@
 ---
-title: 'Coevolution with a seed bank: sporulation of evolved clones'
-output: 
-   html_notebook:
-      code_folding: hide
-editor_options: 
+title: "Sporulation curve on agar surface"
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    code_folding: hide
+editor_options:
   chunk_output_type: inline
 ---
 
@@ -15,7 +17,7 @@ library(here, quietly = TRUE)
 ```
 
 
-```{r, echo=FALSE, message=FALSE}
+```{r consolidate data, echo=FALSE, message=FALSE}
 # get all the file names to collect
 files <- list.files(here("data/output/"), pattern = ".csv",full.names = T, recursive = T)
 d <- data.frame()
@@ -26,45 +28,52 @@ for (f in files){
    tmp <- read_csv(f)
 
 
-   #add experimental time (day) from folder name
-   tmp$day <-    f%>%
-      str_extract("T..H")%>%
-      str_remove("T")%>%
-      parse_number()
-   
+   #add experimental time (hr) as number
+     tmp <- tmp %>%
+     mutate(time.hr = parse_number(t.exp)) %>% 
+       relocate(time.hr, .after = "t.exp")
 
-   
    d <- rbind(d, tmp)
 
       }
 rm(tmp)
 
-# #check completness of data
+# #check completeness of data
 # d%>%
-#    group_by(culture, line)%>%
-#    summarise(n=n())
-
+#    group_by(exp.plate, time.hr, bio.rep)%>%
+#    summarise(n=n()) %>% 
+#   view()
+# 
+# d%>%
+#    group_by(exp.plate, time.hr)%>%
+#    filter(bio.rep != "blank") %>% 
+#    summarise(n=n()) %>% 
+#   view()
 
 ```
 
 clean up data
 
 ```{r}
-# cleanup data
+
 d.clean <-
    d%>%
-   #correct Wt to WT
-   mutate(culture = if_else(str_detect(culture,"Wt"),"WT", culture))%>%
-   # remove rows with NA at spore count
-   filter(!is.na(spore))%>%
-   # shorten replication name
-   mutate(rep = parse_number(rep) %>% paste0("r",.) )%>%
+   # make spore NAs into 1 (0 on log scale)
+   mutate(spore = if_else(!is.na(spore), 1, spore))%>%
    # make spore counts lower than 100 events 1 (0 on log scale)
    mutate(spore = if_else(spore<100, 1, spore) )%>%
-   # make spore counts lower than 100 events 1 (0 on log scale)
-   mutate(veg = if_else(veg<100, 1, spore) )%>%
-   # remove extra WLCt colonies used for comaprisons of streaking media
-   filter (is.na(num) | num == "DSM" )
+   # make veg counts lower than 100 events 1 (0 on log scale)
+   mutate(veg = if_else(veg<100, 1, veg) ) %>% 
+  # unique sample name
+  mutate(unq.sample = str_c(t.exp, bio.rep, exp.plate, sep = "_")) %>% 
+  # blanks are not useful for this analysis
+  filter(bio.rep!="blank") %>% 
+  
+  mutate(spore = if_else(is.na(spore), 0.1, spore),
+         spore.ml = if_else(is.na(spore.ml), 0.1, spore.ml)) %>% 
+  
+  #error in exp.plate assginment
+  mutate(exp.plate = str_replace(exp.plate, "plt23", "plt3"))
 
 ```
 
@@ -74,182 +83,190 @@ Look at data
    
 
 d.clean%>%
-   filter(culture!="BLANK")%>%
-   pivot_longer(names_to = "pop", values_to = "cell.ml", cols = c(veg, spore))%>%
-   ggplot(aes(x=colony, y=cell.ml))+
-   geom_hline(yintercept = 1e4)+
-   geom_point(aes(color=Tsample, shape=rep))+
-   facet_grid(pop~culture+line)+
+   pivot_longer(cols = c(veg.ml, spore.ml),
+                names_to = "pop", values_to = "cell.ml" )%>%
+  # mutate()
+   ggplot(aes(x=bio.rep, y=cell.ml))+
+   geom_point(aes(color=pop, shape=rep))+
+   # facet_wrap(~interaction(time.hr,exp.plate))+
+  facet_wrap(~time.hr+exp.plate)+
    theme_cowplot()+
    panel_border()+
-   # scale_y_log10()+
-   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5))
-```
-
-# Percent spores
- 
-```{r, message=F}
-
-d.clean <- 
-   d.clean%>%
-   mutate(cell.ml=veg.ml+spore.ml)%>%
-   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))
-
-# export the data
-# write_csv(d.clean, here("data/FCM/cytometry_all.csv"))
-
-
-d.clean%>%
-   filter(culture!="BLANK")%>%
-   #average per colony
-   group_by(culture,line,Tsample, colony)%>%
-   summarise(perc.spore=mean(perc.spore), v=sd(perc.spore, na.rm = T))%>%
-   ungroup()%>%
-   mutate(flask=paste(culture,line,sep = "."))%>%
-   #add phage column
-   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
-   # arrange(desc(phage), ,desc(line))%>%
-   arrange(phage, culture,line)%>%
-   mutate(flask=fct_inorder(flask))%>%
-   #PLOT
-ggplot(aes(x=flask,y=perc.spore))+
-   geom_violin(aes(fill=phage), alpha=0.5)+
-   facet_grid(Tsample~.)+
-   theme_cowplot()+
-   panel_border()+
-   theme(legend.position = "bottom")
-
-```
-
-```{r, message=F}
-
-d.clean%>%
-   filter(culture!="BLANK")%>%
-   #average per colony
-   group_by(culture,line,Tsample, colony)%>%
-   summarise(v=sd(perc.spore),perc.spore=mean(perc.spore))%>%
-   ungroup()%>%
-   mutate(flask=paste(culture,line,sep = "."))%>%
-   #add phage column
-   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
-   # arrange(desc(phage), ,desc(line))%>%
-   arrange(phage, culture,line)%>%
-   mutate(flask=fct_inorder(flask))%>%
-   #PLOT
-ggplot(aes(x=Tsample, y=perc.spore, color=colony))+
-   geom_line(aes(group=colony))+
-   geom_errorbar(aes(ymin=perc.spore-v,ymax=perc.spore+v), width=.1)+
-   # geom_point(shape=21, fill="white", size=1.5)+
-   # geom_pointrange(aes(ymin=perc.spore-v,ymax=perc.spore+v), shape=21, fill="white", position = position_dodge(width = 1))+
-   facet_grid(line ~ culture)+
-   theme_cowplot()+
-   panel_border()
-
-```
-
-```{r, message=F}
-
-d.clean%>%
-   filter(culture!="BLANK")%>%
-   #average per colony
-   group_by(culture,line,Tsample, colony)%>%
-   summarise(v=sd(cell.ml),cell.ml=mean(cell.ml))%>%
-   ungroup()%>%
-   mutate(flask=paste(culture,line,sep = "."))%>%
-   #add phage column
-   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
-   # arrange(desc(phage), ,desc(line))%>%
-   arrange(phage, culture,line)%>%
-   mutate(flask=fct_inorder(flask))%>%
-   #PLOT
-ggplot(aes(x=Tsample, y=cell.ml, color=colony))+
-   geom_line(aes(group=colony))+
-   geom_errorbar(aes(ymin=cell.ml-v,ymax=cell.ml+v), width=.1)+
-   facet_grid(line ~ culture)+
    scale_y_log10()+
-   theme_cowplot()+
-   panel_border()
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
+```
+Mostly technical replicates are similar (=rep). Some are off but that should mostly be solved by removing outliers.
+Biological replication also look good.
 
+# N samples
+```{r}
+d.clean%>%
+  group_by(time.hr, exp.plate) %>% 
+  summarise(n=n()) %>% 
+  pivot_wider(names_from = exp.plate,values_from = n) %>% view
+  ggplot(aes(time.hr, volume.nL/1000))+
+  geom_point(aes(color=dilution))+
+  facet_wrap(~exp.plate, ncol = 2)+
+  theme_bw()
 ```
 
-```{r, message=F}
-
-d.clean <- d.clean%>%
-   filter(culture!="BLANK")%>%
-   mutate(cell.ml=veg.ml+spore.ml)%>%
-   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))
-
+dilutions
+```{r}
 d.clean%>%
-   #average per colony
-   group_by(culture,line,Tsample, colony)%>%
-   summarise(n=n(),v=sd(perc.spore),perc.spore=mean(perc.spore))%>%
-   ungroup()%>%
-   mutate(flask=paste(culture,line,sep = "."))%>%
-      #add phage column
-   mutate(phage=if_else(grepl("O", culture),"SPO1", "no_phage"))%>%
-   # arrange(desc(phage), ,desc(line))%>%
-   arrange(phage, culture,line)%>%
-   mutate(flask=fct_inorder(flask))%>%
-   #PLOT
-ggplot(aes(x=colony, y=perc.spore))+
-   geom_col()+
-   geom_point(data = d.clean%>%mutate(flask=paste(culture,line,sep = ".")),
-                 shape=21, color="blue")+
-   geom_errorbar(aes(ymin=perc.spore-v,ymax=perc.spore+v), width=.3)+
-   # geom_text(aes(label=n), y=10)+
-   # geom_pointrange(aes(ymin=perc.spore-v,ymax=perc.spore+v), shape=21, fill="white", position = position_dodge(width = 1))+
-   facet_grid(Tsample~flask)+
+  ggplot(aes(time.hr, volume.nL/1000))+
+  # ggplot(aes(time.hr, total.events/1000))+
+  geom_point(aes(shape = exp.plate,color=dilution))+
+  # facet_wrap(~exp.plate, ncol = 2)+
+  theme_bw()
+```
+
+
+# Replication outliers
+I have made 3 technical replicate measurements in the flow-cytometer for each sample. There are some measurements which are obviously way off, e.g. in "WED12" samples some wells did not get SYBR to to pipetting error. To get rid of these I will choose from each triplicate the 2 points that are in best agreement and remove the 3rd point. There is a function to idenify such a point in pacakge 'outliers'
+> outlier {outliers} Finds value with largest difference between it and sample mean, which can be an outlier.
+
+> logical: if set to TRUE, gives vector of logical values, and possible outlier position is marked by TRUE
+
+I will apply the outlier filtering on the number of spores (spore/mL)
+
+```{r id outliers, echo=FALSE}
+d2 <- 
+  d.clean %>% 
+  group_by(unq.sample) %>% 
+  filter (sybr.modes == median(sybr.modes)) 
+
+
+d3 <- tibble()
+for (i in unique(d2$unq.sample)){
+  
+  tmp <- d2 %>% 
+    filter (unq.sample ==i)
+  
+
+  if (nrow(tmp)<3){
+    tmp$out.lier <- FALSE
+  } else if (sum(tmp$spore.ml)<300){
+    tmp <- tmp %>% 
+    mutate(out.lier = outlier(veg.ml, logical = T)) 
+  } else {
+    tmp <- tmp %>% 
+    mutate(out.lier = outlier(spore.ml, logical = T)) 
+  }
+
+   d3 <- bind_rows(d3,tmp)
+    
+}
+
+
+
+d3%>%
+   ggplot(aes(x=bio.rep, y=veg.ml))+
+    geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
+  facet_wrap(~time.hr+exp.plate)+
    theme_cowplot()+
    panel_border()+
-   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5)) 
+   scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
 
-```
-
-Getting N
-```{r}
-d.clean%>%
-   mutate(cell.ml=veg.ml+spore.ml)%>%
-   mutate(perc.spore=100*(spore.ml+1)/(cell.ml+1))%>%
-   #average per colony
-   group_by(culture, line, Tsample, colony)%>%
-   summarise(n=n())%>%
-   arrange(n())
-```
-
-
-# compare seed bank treatments of non-infected lines
-
-```{r}
-d.avg <- read_csv(here("data/sporulation-growth.csv"))
-
-d.avg <-d.avg %>%
-   # average replicates
-   group_by(culture, host, phage, seed.bank, line, colony, Tsample) %>%
-   summarise(perc.spore = mean(perc.spore), .groups = "drop") %>%
-   # #add seed.bank column to ANC
-   mutate(seed.bank = if_else(line =="ANC", "ANC", seed.bank))%>%
-   # mutate(seed.bank = if_else(str_detect(line, "ANC"), "ANC", seed.bank))%>%
-   mutate(seed.bank = fct_relevel(seed.bank, "ANC", "short", "long"))
-   
-
-d.avg %>%
-   #get only non-infected evoloved lines
-   filter(phage == "no_Phage") %>%
-   # filter(Tsample == "T48H") %>%
-   #plot
-   ggplot(aes(x = seed.bank, y = perc.spore))+
-   geom_violin(fill = "grey")+
-   geom_jitter(aes(color=line), width = 0.2)+
+d3%>%
+   ggplot(aes(x=bio.rep, y=spore.ml))+
+   geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
+  facet_wrap(~time.hr+exp.plate)+
    theme_cowplot()+
-   facet_wrap(~Tsample)
+   panel_border()+
+   scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
+```
+
+
+```{r}
+
+d3 %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  
+    group_by(time.hr, pop) %>%
+  summarise(m = mean(n.ml), v= sd(n.ml) ) %>% 
+
+  
+  ggplot(aes(time.hr, m, color = pop))+
+  geom_pointrange(aes(ymin = m-v, ymax = m+v))+
+  stat_smooth()+
+  # scale_y_log10()+
+
+  theme_cowplot()+
+  panel_border(color = "black")
+  # facet_wrap(~bio.rep)+
+  # theme(strip.background = element_blank())
+  
+
+  
+```
+```{r}
+
+d3 %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml) %>% round(), spore.ml = mean(spore.ml)%>% round()) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+  
+  # write_csv(here("data","Sporulation_by_Time_FCM.csv"))
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml") %>% 
+  
+  # mutate(n.ml = if_else(pop == "perc.spore", n.ml, log10(n.ml))) %>% 
+  group_by(pop) %>% 
+    ggplot(aes(time.hr, n.ml))+
+  geom_point(aes(color = exp.plate))+
+  stat_smooth()+
+  facet_wrap(~pop, scales = "free_y")+
+  theme_cowplot()+
+  panel_border(color = "black")+
+   theme(strip.background = element_blank())
+  
 ```
 
 ```{r}
-d.avg %>%
-   #get only non-infected evoloved lines
-   filter(str_detect(culture, "Ct"))%>%
-   filter(Tsample == "T24H") %>%
-   t.test(perc.spore ~ seed.bank, data = .)
+
+d3 %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml") %>% 
+  group_by(pop) %>% 
+  mutate(rel.abundance = n.ml/max(n.ml)) %>% 
+    ggplot(aes(time.hr, rel.abundance))+
+  geom_point(aes(color = exp.plate))+
+  # stat_smooth()+
+    stat_smooth(formula = "y ~ x", method = "glm", 
+              method.args = list(family="quasibinomial"), se = T) +
+  facet_wrap(~pop, scales = "free_y")+
+
+  theme_cowplot()+
+  panel_border(color = "black")+
+   theme(strip.background = element_blank())
+  
+```
+
+```{r}
+library(gcplyr)
+
 
 ```
 
