@@ -1,0 +1,515 @@
+---
+title: "Sporulation curve on agar surface"
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    code_folding: hide
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r, , include=FALSE}
+library(tidyverse, quietly = TRUE)
+library(cowplot, quietly = TRUE)
+library(outliers, quietly = TRUE)
+library(here, quietly = TRUE)
+```
+
+
+```{r consolidate data, echo=FALSE, message=FALSE}
+# get all the file names to collect
+files <- list.files(here("data/output/"), pattern = ".csv",full.names = T, recursive = T)
+d <- data.frame()
+
+#This loop collects all the data into a single dataframe
+
+for (f in files){
+   tmp <- read_csv(f)
+
+
+   #add experimental time (hr) as number
+     tmp <- tmp %>%
+     mutate(time.hr = parse_number(t.exp)) %>% 
+       relocate(time.hr, .after = "t.exp")
+
+   d <- rbind(d, tmp)
+
+      }
+rm(tmp)
+
+# #check completeness of data
+# d%>%
+#    group_by(exp.plate, time.hr, bio.rep)%>%
+#    summarise(n=n()) %>% 
+#   view()
+# 
+# d%>%
+#    group_by(exp.plate, time.hr)%>%
+#    filter(bio.rep != "blank") %>% 
+#    summarise(n=n()) %>% 
+#   view()
+
+```
+
+clean up data
+
+```{r}
+
+d.clean <-
+   d%>%
+   # make spore NAs into 1 (0 on log scale)
+   mutate(spore = if_else(!is.na(spore), 1, spore))%>%
+   # make spore counts lower than 100 events 1 (0 on log scale)
+   mutate(spore = if_else(spore<100, 1, spore) )%>%
+   # make veg counts lower than 100 events 1 (0 on log scale)
+   mutate(veg = if_else(veg<100, 1, veg) ) %>% 
+  # unique sample name
+  mutate(unq.sample = str_c(t.exp, bio.rep, exp.plate,trt, sep = "_")) %>% 
+  # blanks are not useful for this analysis
+  filter(bio.rep!="blank") %>% 
+  
+  mutate(spore = if_else(is.na(spore), 0.1, spore),
+         spore.ml = if_else(is.na(spore.ml), 0.1, spore.ml)) 
+
+```
+
+Look at data
+
+```{r}   
+   
+
+p <- d.clean%>%
+   pivot_longer(cols = c(veg.ml, spore.ml),
+                names_to = "pop", values_to = "cell.ml" )%>%
+  # mutate()
+   ggplot(aes(x=bio.rep, y=cell.ml))+
+   geom_point(aes(color=pop, shape=rep))+
+   # facet_wrap(~interaction(time.hr,exp.plate))+
+  facet_wrap(trt~time.hr+exp.plate)+
+   theme_cowplot()+
+   panel_border()+
+   scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
+
+ggsave(here("fig", "look-at-TRT-data.png"),p,
+      width = 11, height = 8)
+```
+Mostly technical replicates are similar (=rep). Spore numbers are more variable, mainly because sometimes there replicates differ in calling spore presence (nithing vs something). Some that are off should mostly be solved by removing outliers.
+Biological replication also look good.
+
+# N samples
+```{r}
+d.clean%>%
+  group_by(time.hr, exp.plate, trt) %>% 
+  summarise(n=n()) %>% 
+  pivot_wider(names_from = exp.plate,values_from = n) 
+  # ggplot(aes(time.hr, volume.nL/1000))+
+  # geom_point(aes(color=dilution))+
+  # facet_wrap(~exp.plate, ncol = 2)+
+  # theme_bw()
+```
+
+dilutions
+```{r}
+d.clean%>%
+  ggplot(aes(time.hr, volume.nL/1000))+
+  # ggplot(aes(time.hr, total.events/1000))+
+  geom_point(aes(shape = exp.plate,color=dilution))+
+  # facet_wrap(~exp.plate, ncol = 2)+
+  theme_bw()
+```
+
+
+# Replication outliers
+I have made 3 technical replicate measurements in the flow-cytometer for each sample. There are some measurements which are obviously way off, e.g. in "WED12" samples some wells did not get SYBR to to pipetting error. To get rid of these I will choose from each triplicate the 2 points that are in best agreement and remove the 3rd point. There is a function to idenify such a point in pacakge 'outliers'
+> outlier {outliers} Finds value with largest difference between it and sample mean, which can be an outlier.
+
+> logical: if set to TRUE, gives vector of logical values, and possible outlier position is marked by TRUE
+
+I will apply the outlier filtering on the number of spores (spore/mL)
+
+```{r id outliers, echo=FALSE}
+d2 <- 
+  d.clean %>% 
+  group_by(unq.sample) %>% 
+  filter (sybr.modes == median(sybr.modes)) 
+
+
+d3 <- tibble()
+for (i in unique(d2$unq.sample)){
+  
+  tmp <- d2 %>% 
+    filter (unq.sample ==i)
+  
+
+  if (nrow(tmp)<3){
+    tmp$out.lier <- FALSE
+  } else if (sum(tmp$spore.ml)<300){
+    tmp <- tmp %>% 
+    mutate(out.lier = outlier(veg.ml, logical = T)) 
+  } else {
+    tmp <- tmp %>% 
+    mutate(out.lier = outlier(spore.ml, logical = T)) 
+  }
+
+   d3 <- bind_rows(d3,tmp)
+    
+}
+
+
+
+p <- d3%>%
+   ggplot(aes(x=bio.rep, y=veg.ml))+
+    geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
+  facet_wrap(trt~time.hr+exp.plate)+
+   theme_cowplot()+
+   panel_border()+
+   scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
+
+ggsave(here("fig", "TRT_Veg_ouliers.png"),p,
+      width = 11, height = 8)
+
+p <- d3%>%
+   ggplot(aes(x=bio.rep, y=spore.ml))+
+   geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
+  facet_wrap(trt~time.hr+exp.plate)+
+   theme_cowplot()+
+   panel_border()+
+   scale_y_log10()+
+   theme(axis.text.x = element_text(angle = 90, hjust = 1,vjust=0.5),
+         strip.background = element_blank(),
+         strip.text = element_text(size=8, margin = margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")))
+
+ggsave(here("fig", "TRT_Spore_ouliers.png"),p,
+      width = 11, height = 8)
+
+# remove outliers
+d3 <- d3 %>% 
+  filter(!out.lier)
+```
+
+need to deal with pipeting error that I marked by br3r,
+TO DO LATER
+for now, use this data
+```{r}
+d3 <- d3 %>% 
+  mutate(bio.rep = str_replace(bio.rep, "br3r", "br3"))
+```
+
+Add T0 to all treatments (measured pre treatment)
+```{r}
+d3 <- d3 %>%
+  select(bio.rep, trt) %>% 
+  distinct() %>% 
+  filter(trt != "preTrt") %>% 
+  left_join(., d3 %>% filter(time.hr == 0) %>% select(-trt)) %>% 
+  bind_rows(., d3 %>% filter(trt != "preTrt")) 
+            
+
+```
+```{r}
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  
+  group_by(time.hr, trt, bio.rep, pop) %>% 
+  summarise(n.ml = mean(n.ml)) %>% 
+  # mutate(trt = fct_relevel(trt, "LYSATE",after = 3)) %>% 
+
+  ggplot(aes(time.hr, n.ml, color = pop)) +
+  geom_vline(xintercept = 1.5, color = "red", linetype = 2)+
+  geom_line()+
+  geom_point(shape = 21, fill = "white")+
+  facet_grid( trt %>% fct_relevel("LYSATE",after = 3) ~bio.rep )+
+  facet_grid(bio.rep ~ trt %>% fct_relevel("LYSATE",after = 3))+
+    theme_bw(base_size = 14)+
+  panel_border(color = "black")+
+  theme(strip.background = element_blank())+
+  coord_cartesian(ylim = c(1e5,NA))+
+  scale_y_log10()
+  
+```
+```{r}
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  
+  group_by(time.hr, trt, pop) %>% 
+  summarise(m = mean(n.ml), v = sd(n.ml)) %>% 
+  filter(pop == "spore.ml") %>% 
+
+  ggplot(aes(time.hr, m, color = trt)) +
+  geom_vline(xintercept = 1.5, color = "red", linetype = 2)+
+  geom_line(size = 1)+
+  geom_pointrange(aes(ymax = m+v, ymin = m-v),
+                  shape = 21, fill = "white")+
+    theme_bw()+
+  panel_border(color = "black")+
+  theme(strip.background = element_blank())+
+  coord_cartesian(ylim = c(1e0,NA))+
+  scale_y_log10()+
+  ylab("Total cells/mL suspension")+
+  xlab("Time after spotting on DSM agar (hr)")
+  
+```
+```{r}
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  filter(pop == "spore.ml") %>% 
+
+  ggplot(aes(time.hr, n.ml, color = trt)) +
+  geom_vline(xintercept = 1.5, color = "red", linetype = 2)+
+  geom_smooth(size = 1)+
+  geom_point(shape = 21, fill = "white")+
+    theme_bw()+
+  panel_border(color = "black")+
+  theme(strip.background = element_blank())+
+  coord_cartesian(ylim = c(1e0,NA))+
+  scale_y_log10()+
+  ylab("Spres cells/mL suspension")+
+  xlab("Time after spotting on DSM agar (hr)")+ 
+  facet_wrap(~trt)
+  
+```
+```{r}
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  filter(pop == "spore.ml") %>% 
+
+  ggplot(aes(time.hr, n.ml, color = trt)) +
+  geom_vline(xintercept = 1.5, color = "red", linetype = 2)+
+  geom_smooth(size = 1)+
+  # geom_point(shape = 21, fill = "white")+
+    theme_bw()+
+  panel_border(color = "black")+
+  theme(strip.background = element_blank())+
+  coord_cartesian(ylim = c(1e0,NA))+
+  scale_y_log10()+
+  ylab("Spores/mL suspension")+
+  xlab("Time after spotting on DSM agar (hr)")
+  # facet_wrap(~trt)
+  
+```
+```{r}
+
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml),names_to = "pop", values_to = "n.ml") %>% 
+  
+    group_by(time.hr, trt,pop) %>%
+  summarise(m = mean(n.ml), v= sd(n.ml) ) %>% 
+
+  
+  ggplot(aes(time.hr, m))+
+  geom_pointrange(aes(ymin = m-v, ymax = m+v))+
+  stat_smooth(se = F)+
+  # scale_y_log10()+
+
+  theme_cowplot()+
+  panel_border(color = "black")+
+  facet_grid(trt~pop)+
+  theme(strip.background = element_blank())
+  
+
+  
+```
+```{r}
+
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml) %>% round(), spore.ml = mean(spore.ml)%>% round()) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+  
+  # write_csv(here("data","Sporulation_by_Time_FCM.csv"))
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml") %>% 
+  
+  # mutate(n.ml = if_else(pop == "perc.spore", n.ml, log10(n.ml))) %>% 
+  group_by(trt,pop) %>% 
+    ggplot(aes(time.hr, n.ml))+
+  geom_point(aes(color = bio.rep), shape = 21)+
+  stat_smooth()+
+  facet_grid(pop ~ trt, scales = "free_y")+
+  theme_cowplot()+
+  panel_border(color = "black")+
+   theme(strip.background = element_blank())
+  
+```
+
+```{r}
+
+d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml") %>% 
+  group_by(pop) %>% 
+  mutate(rel.abundance = n.ml/max(n.ml)) %>% 
+    ggplot(aes(time.hr, rel.abundance))+
+  geom_point(aes(color = exp.plate))+
+  # stat_smooth()+
+    stat_smooth(formula = "y ~ x", method = "glm", 
+              method.args = list(family="quasibinomial"), se = T) +
+  facet_grid(trt~pop, scales = "free_y")+
+
+  theme_cowplot()+
+  panel_border(color = "black")+
+   theme(strip.background = element_blank())
+  
+```
+```{r}
+# Follwing https://www.ipb.pt/~vcadavez/websiteVC/tutorial/rcode/2019-04-28-gompertzmodel/
+
+Gompertz <- function(x, y0, ymax, k, lag){
+      result <- y0 + (ymax -y0)*exp(-exp(k*(lag-x)/(ymax-y0) + 1) )
+      return(result)
+      }
+
+test.data <- 
+  d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml")   %>% 
+  mutate(logN = ifelse(n.ml < 1, 1, log10(n.ml))) 
+
+d.stats <- tibble()  
+for (i_trt in unique(test.data$trt)){
+  for(i_br in unique(test.data$bio.rep)){
+    # for (i_pop in unique(test.data$pop)){
+    for (i_pop in "spore.ml"){
+      
+      tmp <- 
+        test.data %>% 
+        filter(trt == i_trt) %>% 
+        filter(pop == i_pop) %>%
+        filter(bio.rep == i_br) %>%
+        select(Time = time.hr,exp.plate,bio.rep, logN) %>% 
+        as.data.frame()
+    tryCatch({  
+      Gomp1 <-  nls(logN ~ Gompertz(Time, y0, ymax, k, lag),
+               data = tmp,
+               start = list( ymax=7, k=0.5, lag=5),
+              control = list(maxiter = 500))
+
+
+      # extract model parameters
+      coefs <- coef(Gomp1)
+      
+      d.stats <- tibble(
+          trt = i_trt,
+          pop = i_pop,
+          bio.rep = i_br,
+          # y0   = coefs[[1]],
+          ymax = coefs[[1]],
+          k   = coefs[[1]],
+          lag = coefs[[3]]
+      ) %>% 
+        bind_rows(d.stats,.)
+    }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+
+    }
+  }
+}
+
+filter(trt == "BUFFER") %>% 
+  filter(pop == "spore.ml") %>% 
+   filter(bio.rep == "br2") %>%
+  mutate(logN = ifelse(n.ml < 1, 1, log10(n.ml))) %>% 
+  select(Time = time.hr,exp.plate,bio.rep, logN) %>% 
+  as.data.frame()
+    # plot(test.data$Time, test.data$logN)
+
+
+
+
+
+
+plot(1:20,Gompertz(1:20,y0 = y0, ymax = ymax, k = k, lag=lag))
+```
+
+
+```{r}
+# Follwing https://www.ipb.pt/~vcadavez/websiteVC/tutorial/rcode/2019-04-28-gompertzmodel/
+
+test.data <- 
+  d3 %>% 
+  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml, 
+          perc.spore =spore.ml*100/cell.ml ) %>% 
+
+  pivot_longer(cols = c(cell.ml, spore.ml, veg.ml, perc.spore),
+               names_to = "pop", values_to = "n.ml") %>%  
+  filter(trt == "BUFFER") %>% 
+  filter(pop == "spore.ml") %>% 
+   filter(bio.rep == "br2") %>%
+  mutate(logN = ifelse(n.ml < 1, 1, log10(n.ml))) %>% 
+  select(Time = time.hr,exp.plate,bio.rep, logN) %>% 
+  as.data.frame()
+    # plot(test.data$Time, test.data$logN)
+
+Gompertz <- function(x, y0, ymax, k, lag){
+      result <- y0 + (ymax -y0)*exp(-exp(k*(lag-x)/(ymax-y0) + 1) )
+      return(result)
+      }
+
+
+Gomp1 <-  nls(logN ~ Gompertz(Time, y0, ymax, k, lag),
+               data = test.data,
+               start = list(y0=0.15, ymax=7, k=0.5, lag=5),
+              control = list(maxiter = 500))
+
+
+# ectract model parameters
+coefs <- coef(Gomp1)
+coefs
+ #       y0      ymax         k       lag 
+ # 1.569712  8.792401 12.205638 10.578883 
+y0   <- coefs[[1]]
+ymax <- coefs[[2]]
+k   <- coefs[[3]]
+lag <- coefs[[4]]
+
+plot(1:20,Gompertz(1:20,y0 = y0, ymax = ymax, k = k, lag=lag))
+```
+
