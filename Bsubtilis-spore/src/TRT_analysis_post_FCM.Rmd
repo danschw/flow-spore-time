@@ -292,6 +292,18 @@ d3 %>%
   scale_y_log10()
   
 ```
+### export data
+```{r}
+d3 %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
+  ungroup() %>% 
+   mutate(cell.ml = veg.ml + spore.ml) %>% 
+  write_csv(here("data", "clean_counts.csv"))
+```
+
+
+
 ```{r}
 d3 %>% 
   group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
