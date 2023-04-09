@@ -41,7 +41,7 @@ rm(tmp)
 # #check completeness of data
 # d%>%
 #    group_by(exp.plate, time.hr, bio.rep)%>%
-#    summarise(n=n()) %>% 
+#    summarise(n=n()) %>%
 #   view()
 # 
 # d%>%
@@ -52,25 +52,90 @@ rm(tmp)
 
 ```
 
-clean up data
+
+### Fix a couple of errors
+
+In manual inspection of gate plots ("scatterSYBR" plots) I recognized 2 errors:  
+
+1. Samples swapped. In sample taken on *TUE21* samples of *DSM-br2* were swapped between T24 (plt1) and T12 (plt2). I will resove this by swapping the labels.  
+
+2. T0 samples were not handled well by the classification cluster model (veg vs. spores). It appears that there is misclassification of veg events as spores, while there don't seem to be any spores. I will reassign all the spore counts in these samples to veg.  
+
+3. Pipetting error. In *T12* sample of *br3* in *plate 1* only one of the treatments was initially processed. I caught the error in time and analyzed all the treatments labeling them *br3r*. 
+
+```{r fix1}
+d.swapped <- d %>% 
+  filter(sample.date == "TUE21" &
+           trt == "DSM" &
+           bio.rep == "br2") %>% 
+  mutate(exp.plate = if_else(well %in% c("A8","B8","C8"), "plt2", "plt1"),
+         t.exp = if_else(well %in% c("A8","B8","C8"), "T12", "T24"),
+         time.hr = if_else(well %in% c("A8","B8","C8"), 12, 24))
+
+d <- d %>% 
+  filter(sample.date != "TUE21" |
+           trt != "DSM" |
+           bio.rep != "br2") %>% 
+  rbind(., d.swapped)
+
+rm(d.swapped)
+```
+
+```{r fix2}
+d.T0 <- d %>% 
+  filter(t.exp == "T00") %>% 
+  mutate(veg = veg + spore, 
+         veg.ml = veg.ml + spore.ml) %>% 
+  mutate(spore = 0, spore.ml = 0)
+
+d <- d %>% 
+  filter(t.exp != "T00") %>% 
+  rbind(., d.T0)
+
+rm(d.T0)
+
+```
+
+```{r fix3}
+d.br3r <- d %>% 
+  filter(sample.date == "TUE09" &
+          t.exp == "T12" &
+          exp.plate == "plt1" &
+          str_detect(bio.rep, "br3")) %>% 
+  filter(bio.rep == "br3r") %>% 
+  mutate(bio.rep = "br3")
+
+d <- d %>% 
+  filter(sample.date != "TUE09" |
+          t.exp != "T12" |
+          exp.plate != "plt1" |
+          !str_detect(bio.rep, "br3")) %>% 
+  bind_rows(., d.br3r)
+
+rm(d.br3r)
+  
+```
+
+
+### clean up data
 
 ```{r}
 
 d.clean <-
    d%>%
-   # make spore NAs into 1 (0 on log scale)
-   mutate(spore = if_else(!is.na(spore), 1, spore))%>%
-   # make spore counts lower than 100 events 1 (0 on log scale)
-   mutate(spore = if_else(spore<100, 1, spore) )%>%
-   # make veg counts lower than 100 events 1 (0 on log scale)
-   mutate(veg = if_else(veg<100, 1, veg) ) %>% 
+   # make NAs into 1 (0 on log scale)
+  mutate(spore = if_else(is.na(spore), 1, spore))%>%
+  mutate(veg = if_else(is.na(veg), 1, veg))%>%
+   # make spore counts lower than 1000 events 1 (0 on log scale)
+   mutate(spore = if_else(spore<1000, 1, spore) )%>%
+  mutate(spore.ml = if_else(spore<1000, 1, spore.ml) )%>%
+   # make veg counts lower than 1000 events 1 (0 on log scale)
+   mutate(veg = if_else(veg<1000, 1, veg) ) %>% 
+  mutate(veg.ml = if_else(veg<1000, 1, veg.ml) ) %>% 
   # unique sample name
   mutate(unq.sample = str_c(t.exp, bio.rep, exp.plate,trt, sep = "_")) %>% 
   # blanks are not useful for this analysis
-  filter(bio.rep!="blank") %>% 
-  
-  mutate(spore = if_else(is.na(spore), 0.1, spore),
-         spore.ml = if_else(is.na(spore.ml), 0.1, spore.ml)) 
+  filter(bio.rep!="blank") 
 
 ```
 
@@ -97,7 +162,7 @@ p <- d.clean%>%
 ggsave(here("fig", "look-at-TRT-data.png"),p,
       width = 11, height = 8)
 ```
-Mostly technical replicates are similar (=rep). Spore numbers are more variable, mainly because sometimes there replicates differ in calling spore presence (nithing vs something). Some that are off should mostly be solved by removing outliers.
+Mostly technical replicates are similar (=rep). Some that are off should mostly be solved by removing outliers.
 Biological replication also look good.
 
 # N samples
@@ -105,11 +170,10 @@ Biological replication also look good.
 d.clean%>%
   group_by(time.hr, exp.plate, trt) %>% 
   summarise(n=n()) %>% 
-  pivot_wider(names_from = exp.plate,values_from = n) 
-  # ggplot(aes(time.hr, volume.nL/1000))+
-  # geom_point(aes(color=dilution))+
-  # facet_wrap(~exp.plate, ncol = 2)+
-  # theme_bw()
+  # pivot_wider(names_from = exp.plate,values_from = n) %>% 
+  ggplot(aes(time.hr, exp.plate)) +
+  geom_tile(aes(fill = n), color = "white")+
+  theme_bw()
 ```
 
 dilutions
@@ -132,16 +196,12 @@ I have made 3 technical replicate measurements in the flow-cytometer for each sa
 I will apply the outlier filtering on the number of spores (spore/mL)
 
 ```{r id outliers, echo=FALSE}
-d2 <- 
-  d.clean %>% 
-  group_by(unq.sample) %>% 
-  filter (sybr.modes == median(sybr.modes)) 
 
 
-d3 <- tibble()
-for (i in unique(d2$unq.sample)){
+d2 <- tibble()
+for (i in unique(d.clean$unq.sample)){
   
-  tmp <- d2 %>% 
+  tmp <- d.clean %>% 
     filter (unq.sample ==i)
   
 
@@ -155,13 +215,13 @@ for (i in unique(d2$unq.sample)){
     mutate(out.lier = outlier(spore.ml, logical = T)) 
   }
 
-   d3 <- bind_rows(d3,tmp)
+   d2 <- bind_rows(d2,tmp)
     
 }
 
 
 
-p <- d3%>%
+p <- d2%>%
    ggplot(aes(x=bio.rep, y=veg.ml))+
     geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
   facet_wrap(trt~time.hr+exp.plate)+
@@ -175,7 +235,7 @@ p <- d3%>%
 ggsave(here("fig", "TRT_Veg_ouliers.png"),p,
       width = 11, height = 8)
 
-p <- d3%>%
+p <- d2%>%
    ggplot(aes(x=bio.rep, y=spore.ml))+
    geom_jitter(aes(color=out.lier), shape=21, width = 0.2, height = 0)+
   facet_wrap(trt~time.hr+exp.plate)+
@@ -190,17 +250,10 @@ ggsave(here("fig", "TRT_Spore_ouliers.png"),p,
       width = 11, height = 8)
 
 # remove outliers
-d3 <- d3 %>% 
+d3 <- d2 %>% 
   filter(!out.lier)
 ```
 
-need to deal with pipeting error that I marked by br3r,
-TO DO LATER
-for now, use this data
-```{r}
-d3 <- d3 %>% 
-  mutate(bio.rep = str_replace(bio.rep, "br3r", "br3"))
-```
 
 Add T0 to all treatments (measured pre treatment)
 ```{r}
@@ -215,7 +268,7 @@ d3 <- d3 %>%
 ```
 ```{r}
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml) %>% 
@@ -241,7 +294,7 @@ d3 %>%
 ```
 ```{r}
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml) %>% 
@@ -268,7 +321,7 @@ d3 %>%
 ```
 ```{r}
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml) %>% 
@@ -292,7 +345,7 @@ d3 %>%
 ```
 ```{r}
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml) %>% 
@@ -317,7 +370,7 @@ d3 %>%
 ```{r}
 
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt, bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml) %>% 
@@ -344,7 +397,7 @@ d3 %>%
 ```{r}
 
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml) %>% round(), spore.ml = mean(spore.ml)%>% round()) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml, 
@@ -370,7 +423,7 @@ d3 %>%
 ```{r}
 
 d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml, 
@@ -402,7 +455,7 @@ Gompertz <- function(x, y0, ymax, k, lag){
 
 test.data <- 
   d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml, 
@@ -472,7 +525,7 @@ plot(1:20,Gompertz(1:20,y0 = y0, ymax = ymax, k = k, lag=lag))
 
 test.data <- 
   d3 %>% 
-  group_by(sample.day.hr,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
+  group_by(sample.date,exp.plate,t.exp,time.hr, trt,bio.rep) %>% 
   summarise(veg.ml = mean(veg.ml), spore.ml = mean(spore.ml)) %>% 
   ungroup() %>% 
    mutate(cell.ml = veg.ml + spore.ml, 
